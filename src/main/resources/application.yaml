@@ -1,0 +1,73 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: membership
+  datasource:
+    url: jdbc:postgresql://localhost:5432/membership
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+  kafka:
+    bootstrap-servers: localhost:9092
+
+    consumer:
+      group-id: ecommerce-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # manual ack — offsets committed only after business logic succeeds
+      enable-auto-commit: false
+      # number of listener threads per topic-partition set; override per-factory in KafkaConsumerConfig
+      concurrency: 1
+
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+app:
+  kafka:
+    topics:
+      order: order-topic
+      payment: payment-topic
+      # dead-letter topics: messages that exhaust retries are parked here
+      order-dlt: order-topic.DLT
+      payment-dlt: payment-topic.DLT
+    retry:
+      # applied to both consumer factories via DefaultErrorHandler
+      max-attempts: 3
+      interval-ms: 1000
+
+# ── Observability ────────────────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+    display-request-duration: true
+  packages-to-scan: com.firstclub.membership.controller
