@@ -12,6 +12,7 @@ A Spring Boot service that manages membership tiers, subscription plans, and ben
 - [API Reference](#api-reference)
 - [Kafka Integration](#kafka-integration)
 - [Design Patterns](#design-patterns)
+- [Performance Optimizations](#performance-optimizations)
 - [Observability](#observability)
 - [Prerequisites](#prerequisites)
 - [Running Locally](#running-locally)
@@ -46,8 +47,8 @@ A Spring Boot service that manages membership tiers, subscription plans, and ben
           │  Orders     │            │
           │  AuditLogs  │   ┌────────▼──────────────────┐
           └─────────────┘   │  Kafka Consumers           │
-                            │  OrderConsumer (concurrent)│
-                            │  PaymentConsumer (serial)  │
+             Redis           │  OrderConsumer (concurrent)│
+             Cache Layer     │  PaymentConsumer (serial)  │
                             │  → retry x3 → DLT on fail │
                             └───────────────────────────┘
 ```
@@ -61,6 +62,7 @@ A Spring Boot service that manages membership tiers, subscription plans, and ben
 | Framework | Spring Boot 4.0.6, Java 21 |
 | Database | PostgreSQL 16 via Hibernate (dialect: PostgreSQLDialect) |
 | Messaging | Apache Kafka 7.5.0 (Confluent via Docker) |
+| Cache | Redis 7 via `spring-boot-starter-data-redis` (TTL 10 min, JSON serialization) |
 | Validation | Jakarta Bean Validation (`spring-boot-starter-validation`) |
 | API Docs | SpringDoc OpenAPI 2.6.0 (Swagger UI) |
 | Observability | Spring Actuator + Micrometer + Prometheus |
@@ -126,7 +128,15 @@ All request params use `snake_case`. Error responses return `{ "message": "...",
 |---|---|---|---|
 | `POST` | `/api/v1/kafka/sendOrderEvent` | `{ "phone_number", "order_id", "order_value" }` | Simulate an order event. Triggers aggregate update + tier re-evaluation |
 
+### HTTP Status Codes
 
+| Code | Meaning |
+|---|---|
+| `200` | Success |
+| `400` | Validation failure (blank field, invalid value) |
+| `404` | User, plan, or active subscription not found |
+| `409` | Duplicate subscription or already on requested plan |
+| `500` | Unexpected server error |
 
 ---
 
@@ -176,10 +186,35 @@ KafkaProducerService ──► order-topic
 |---|---|---|
 | **Strategy** | `TierRuleEvaluator` interface + 3 implementations | Each evaluator (`ORDER_COUNT`, `ORDER_VALUE`, `USER_COHORT`) is a pluggable strategy selected by the factory |
 | **Template Method** | `AbstractTierRuleEvaluator` | Fetch-criteria → guard-empty → delegate is defined once; subclasses only implement `doEvaluate()` |
-| **Factory** | `TierRuleEvaluatorFactory` | Resolves the correct evaluator by `CriteriaType` at runtime |
+| **Factory** | `TierRuleEvaluatorFactory` | Resolves the correct evaluator by `CriteriaType` at runtime via O(1) map lookup |
 | **Chain of Responsibility** | `GlobalExceptionHandler` | Exception types are handled in order from most-specific (`UserNotFoundException`) to generic fallback |
 | **Idempotent Consumer** | `ProcessedOrder` entity | Prevents duplicate processing on Kafka redelivery |
 | **State** | `SubscriptionStatus`, `PlanStatus` enums + `AttributeConverter` | DB stores lowercase strings (`"active"`); Java uses uppercase enum constants; converter bridges both |
+
+---
+
+## Performance Optimizations
+
+### Caching
+
+Reference data that rarely changes is cached in Redis (TTL: 10 minutes). Values are serialized as JSON using `JacksonJsonRedisSerializer`. This eliminates repeated DB round-trips on the hot path and shares cache state across multiple application instances.
+
+| Cache name | Method | Benefit |
+|---|---|---|
+| `tierCriteria` | `TierCriteriaRepository.findByCriteriaType()` | Called 3× per order event — now served from memory |
+| `activePlans` | `MembershipPlanRepository.findByStatus()` | Called on every `/plans` request |
+| `tierBenefits` | `TierBenefitRepository.findByMembershipTierId()` | Called on every `/plans` request |
+
+### Database
+
+- **Composite index** on `user_membership(user_id, status)` — speeds up every membership lookup.
+- **`ORDER_COUNT` evaluator** uses a single `SUM` aggregate query scoped to the current month instead of fetching all historical rows and summing in Java.
+- **`@Transactional` dirty checking** — removed explicit `save()` calls on already-managed entities; Hibernate flushes mutations automatically on commit.
+
+### Tier Evaluation
+
+- **Platinum short-circuit** — users already on the highest tier skip all 3 evaluator calls entirely.
+- **O(1) evaluator lookup** — `TierRuleEvaluatorFactory` builds a `Map<String, TierRuleEvaluator>` at startup instead of scanning a list on every order event.
 
 ---
 
@@ -216,7 +251,7 @@ Kafka consumer metrics exposed automatically (requires Micrometer):
 docker compose up -d
 ```
 
-This starts PostgreSQL on port `5432`, Zookeeper, and Kafka on port `9092`. Hibernate auto-creates the schema on first run (`ddl-auto: update`).
+This starts PostgreSQL on port `5432`, Redis on port `6379`, Zookeeper, and Kafka on port `9092`. Hibernate auto-creates the schema on first run (`ddl-auto: update`).
 
 Verify containers are running:
 
@@ -284,6 +319,11 @@ curl "http://localhost:8080/api/v1/membership/userMembershipDetails?phone_number
 spring.datasource.url: jdbc:postgresql://localhost:5432/membership
 spring.datasource.username: postgres
 spring.datasource.password: postgres
+
+# Cache (Redis)
+spring.cache.type: redis
+spring.data.redis.host: localhost
+spring.data.redis.port: 6379
 
 # Kafka broker
 spring.kafka.bootstrap-servers: localhost:9092

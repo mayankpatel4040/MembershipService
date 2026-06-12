@@ -9,7 +9,6 @@ import com.firstclub.membership.enums.CriteriaType;
 import com.firstclub.membership.enums.DurationType;
 import com.firstclub.membership.enums.Operators;
 import com.firstclub.membership.enums.PlanStatus;
-import lombok.extern.log4j.Log4j2;
 import com.firstclub.membership.repository.MembershipPlanRepository;
 import com.firstclub.membership.repository.MembershipTierRepository;
 import com.firstclub.membership.repository.TierBenefitRepository;
@@ -24,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
@@ -40,8 +40,10 @@ public class DataInitializer implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         seedTiers();
         seedPlans();
-        seedBenefits();
-        seedCriteria();
+        Map<String, MembershipTier> tiers = membershipTierRepository.findAll().stream()
+                .collect(Collectors.toMap(MembershipTier::getName, t -> t));
+        seedBenefits(tiers);
+        seedCriteria(tiers);
     }
 
     private void seedTiers() {
@@ -49,10 +51,11 @@ public class DataInitializer implements ApplicationRunner {
             log.info("MembershipTier already seeded, skipping");
             return;
         }
-        MembershipTier silver = tier("Silver", 1, "Entry tier — default on signup");
-        MembershipTier gold = tier("Gold", 2, "Earned via spend or count");
-        MembershipTier platinum = tier("Platinum", 3, "Top tier — highest perks");
-        membershipTierRepository.saveAll(List.of(silver, gold, platinum));
+        membershipTierRepository.saveAll(List.of(
+                tier("Silver", 1, "Entry tier — default on signup"),
+                tier("Gold", 2, "Earned via spend or count"),
+                tier("Platinum", 3, "Top tier — highest perks")
+        ));
         log.info("Seeded tiers: Silver, Gold, Platinum");
     }
 
@@ -61,21 +64,22 @@ public class DataInitializer implements ApplicationRunner {
             log.info("MembershipPlan already seeded, skipping");
             return;
         }
-        MembershipPlan monthly = plan("Monthly", DurationType.MONTHLY, 30, "199.00");
-        MembershipPlan quarterly = plan("Quarterly", DurationType.QUARTERLY, 90, "499.00");
-        MembershipPlan yearly = plan("Yearly", DurationType.ANNUALLY, 365, "1499.00");
-        membershipPlanRepository.saveAll(List.of(monthly, quarterly, yearly));
+        membershipPlanRepository.saveAll(List.of(
+                plan("Monthly", DurationType.MONTHLY, 30, "199.00"),
+                plan("Quarterly", DurationType.QUARTERLY, 90, "499.00"),
+                plan("Yearly", DurationType.ANNUALLY, 365, "1499.00")
+        ));
         log.info("Seeded plans: Monthly (199), Quarterly (499), Yearly (1499)");
     }
 
-    private void seedBenefits() {
+    private void seedBenefits(Map<String, MembershipTier> tiers) {
         if (tierBenefitRepository.count() > 0) {
             log.info("TierBenefit already seeded, skipping");
             return;
         }
-        MembershipTier silver = membershipTierRepository.findByName("Silver");
-        MembershipTier gold = membershipTierRepository.findByName("Gold");
-        MembershipTier platinum = membershipTierRepository.findByName("Platinum");
+        MembershipTier silver = tiers.get("Silver");
+        MembershipTier gold = tiers.get("Gold");
+        MembershipTier platinum = tiers.get("Platinum");
 
         tierBenefitRepository.saveAll(List.of(
                 benefit(silver, BenefitType.FREE_DELIVERY, Map.of("min_order_value", 999)),
@@ -92,14 +96,13 @@ public class DataInitializer implements ApplicationRunner {
         log.info("Seeded tier benefits");
     }
 
-    private void seedCriteria() {
-        // Single guard: if ANY criteria rows exist, skip entirely to avoid partial double-seeding
+    private void seedCriteria(Map<String, MembershipTier> tiers) {
         if (tierCriteriaRepository.count() > 0) {
             log.info("TierCriteria already seeded, skipping");
             return;
         }
-        MembershipTier gold = membershipTierRepository.findByName("Gold");
-        MembershipTier platinum = membershipTierRepository.findByName("Platinum");
+        MembershipTier gold = tiers.get("Gold");
+        MembershipTier platinum = tiers.get("Platinum");
 
         tierCriteriaRepository.saveAll(List.of(
                 criterion(gold, CriteriaType.ORDER_COUNT, 10, 30, Operators.GREATER_THAN_OR_EQUALS, Map.of(), 1),

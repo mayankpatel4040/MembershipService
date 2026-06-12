@@ -46,7 +46,7 @@ public class OrderService {
         if (updated == 0) {
             try {
                 orderAggregateRepository.save(OrderAggregate.builder()
-                        .userId(user)
+                        .user(user)
                         .orderMonthYear(orderMonthYear)
                         .orderCount(1)
                         .totalAmount(orderDetail.getOrderValue())

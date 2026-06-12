@@ -15,7 +15,6 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Objects;
 
 @Service
 @RequiredArgsConstructor
@@ -30,8 +29,14 @@ public class TierRuleEvaluatorService {
     @Transactional
     public void evaluateRules(String phoneNumber) {
         User user = userRepository.findByPhoneNumber(phoneNumber);
-        if (Objects.isNull(user)) {
+        if (user == null) {
             log.error("User not found with phone number: {}", phoneNumber);
+            return;
+        }
+
+        MembershipTier currentTier = user.getMembershipTier();
+        if (currentTier != null && TierType.PLATINUM.getDisplayName().equalsIgnoreCase(currentTier.getName())) {
+            log.info("User {} already Platinum, skipping evaluation", user.getId());
             return;
         }
 
@@ -42,7 +47,7 @@ public class TierRuleEvaluatorService {
                         tierRuleEvaluatorFactory.getTierRuleEvaluator(criteriaType.name());
                 TierType candidate = tierRuleEvaluator.evaluateRule(user);
                 log.info("Evaluator [{}] -> {} for user {}", criteriaType, candidate, user.getId());
-                if (Objects.nonNull(candidate) && candidate.getRank() > assignedTier.getRank()) {
+                if (candidate != null && candidate.getRank() > assignedTier.getRank()) {
                     assignedTier = candidate;
                 }
             } catch (IllegalArgumentException e) {
@@ -51,23 +56,20 @@ public class TierRuleEvaluatorService {
             }
         }
 
-        MembershipTier existingTier = user.getMembershipTier();
-        if (Objects.nonNull(existingTier)
-                && existingTier.getName().equalsIgnoreCase(assignedTier.getDisplayName())) {
+        if (currentTier != null && currentTier.getName().equalsIgnoreCase(assignedTier.getDisplayName())) {
             log.info("User {} already on tier {}, skipping reassignment", user.getId(), assignedTier);
             return;
         }
 
         MembershipTier membershipTier = membershipTierRepository.findByName(assignedTier.getDisplayName());
         user.setMembershipTier(membershipTier);
-        userRepository.save(user);
         log.info("Assigned tier for user {}: {} (was {})",
                 user.getId(), assignedTier,
-                Objects.nonNull(existingTier) ? existingTier.getName() : "none");
+                currentTier != null ? currentTier.getName() : "none");
 
         auditLogRepository.save(AuditLog.builder()
                 .phoneNumber(user.getPhoneNumber())
-                .fromTier(existingTier)
+                .fromTier(currentTier)
                 .toTier(membershipTier)
                 .build());
     }

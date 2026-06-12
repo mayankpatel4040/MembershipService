@@ -31,7 +31,7 @@ public class OrderAggregate {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false, foreignKey = @ForeignKey(name = "fk_order_aggregate_user"))
-    private User userId;
+    private User user;
 
     @Column(name = "order_month_year", nullable = false)
     private String orderMonthYear; // Format: YYYY-MM

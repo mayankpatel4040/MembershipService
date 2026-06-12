@@ -13,7 +13,10 @@ import java.time.ZonedDateTime;
 
 @Entity
 @Data
-@Table(name = "user_membership")
+@Table(
+    name = "user_membership",
+    indexes = @Index(name = "idx_user_membership_user_status", columnList = "user_id, status")
+)
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor

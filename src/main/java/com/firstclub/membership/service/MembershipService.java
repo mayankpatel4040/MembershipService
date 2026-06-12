@@ -104,7 +104,6 @@ public class MembershipService {
 
         existing.setStatus(SubscriptionStatus.CANCELLED);
         existing.setEndDate(ZonedDateTime.now());
-        userMembershipRepository.save(existing);
 
         ZonedDateTime start = ZonedDateTime.now();
         userMembershipRepository.save(UserMembership.builder()
@@ -138,7 +137,6 @@ public class MembershipService {
         }
 
         existing.setStatus(SubscriptionStatus.CANCELLED);
-        userMembershipRepository.save(existing);
 
         auditLogRepository.save(AuditLog.builder()
                 .phoneNumber(user.getPhoneNumber())
